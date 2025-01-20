@@ -6,7 +6,7 @@ Description: A plugin to find and replace a word in WordPress post titles, with 
 Version: 1.0
 Author: Matthew Gross
 Author URI: https://matthewpg.com/
-License: GPL2
+License: GNU GENERAL PUBLIC LICENSE (See LICENSE)
 */
 
 if ( ! defined( 'ABSPATH' ) ) {
