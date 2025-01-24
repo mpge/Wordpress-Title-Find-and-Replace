@@ -2,8 +2,8 @@
 /*
 Plugin Name: WP Title Find and Replace
 Plugin URI: https://matthewpg.com/
-Description: A plugin to find and replace a word in WordPress post titles, with a soft run feature.
-Version: 1.0
+Description: A plugin to find and replace a word in WordPress post titles and Yoast SEO meta titles, with a soft run feature.
+Version: 1.1
 Author: Matthew Gross
 Author URI: https://matthewpg.com/
 License: GNU GENERAL PUBLIC LICENSE (See LICENSE)
@@ -31,25 +31,34 @@ function wp_title_find_replace_settings_page() {
     global $wpdb;
 
     $table_name = $wpdb->prefix . 'posts';
+    $yoast_meta_key = '_yoast_wpseo_title';
 
     if ( isset( $_POST['wp_title_find_replace_run'] ) ) {
         check_admin_referer( 'wp_title_find_replace_nonce' );
 
         $find_word = sanitize_text_field( $_POST['find_word'] );
         $replace_word = sanitize_text_field( $_POST['replace_word'] );
+        $exclude_word = sanitize_text_field( $_POST['exclude_word'] );
+        $update_yoast = isset( $_POST['update_yoast'] );
 
         if ( ! empty( $find_word ) ) {
+            // SQL condition to exclude posts containing the exclude_word
+            $exclude_condition = ! empty( $exclude_word )
+                ? "AND post_title NOT LIKE '%" . $wpdb->esc_like( $exclude_word ) . "%'"
+                : '';
+
             // Perform a soft run if 'Soft Run' is selected
             if ( isset( $_POST['soft_run'] ) ) {
                 $results = $wpdb->get_results( $wpdb->prepare(
                     "SELECT ID, post_title 
                      FROM $table_name 
                      WHERE post_type = 'post' 
-                     AND post_title LIKE %s",
+                     AND post_title LIKE %s
+                     $exclude_condition",
                     '%' . $wpdb->esc_like( $find_word ) . '%'
                 ) );
 
-                echo '<div class="notice notice-info"><p>Soft Run: Found ' . count( $results ) . ' titles containing "' . esc_html( $find_word ) . '".</p></div>';
+                echo '<div class="notice notice-info"><p>Soft Run: Found ' . count( $results ) . ' titles containing "' . esc_html( $find_word ) . '" and excluding "' . esc_html( $exclude_word ) . '".</p></div>';
 
                 if ( ! empty( $results ) ) {
                     echo '<h2>Preview of Changes:</h2>';
@@ -75,11 +84,34 @@ function wp_title_find_replace_settings_page() {
                     "UPDATE $table_name 
                      SET post_title = REPLACE(post_title, %s, %s) 
                      WHERE post_type = 'post' 
-                     AND post_title LIKE %s",
+                     AND post_title LIKE %s
+                     $exclude_condition",
                     $find_word, $replace_word, '%' . $wpdb->esc_like( $find_word ) . '%'
                 ) );
 
                 echo '<div class="updated"><p>Updated ' . esc_html( $updated_count ) . ' post titles.</p></div>';
+
+                // Update Yoast titles if selected
+                if ( $update_yoast ) {
+                    $yoast_results = $wpdb->get_results( $wpdb->prepare(
+                        "SELECT post_id, meta_value 
+                         FROM {$wpdb->prefix}postmeta 
+                         WHERE meta_key = %s 
+                         AND meta_value LIKE %s",
+                        $yoast_meta_key, '%' . $wpdb->esc_like( $find_word ) . '%'
+                    ) );
+
+                    foreach ( $yoast_results as $row ) {
+                        $updated_meta_title = str_replace( $find_word, $replace_word, $row->meta_value );
+                        $wpdb->update(
+                            "{$wpdb->prefix}postmeta",
+                            [ 'meta_value' => $updated_meta_title ],
+                            [ 'post_id' => $row->post_id, 'meta_key' => $yoast_meta_key ]
+                        );
+                    }
+
+                    echo '<div class="updated"><p>Updated Yoast SEO meta titles.</p></div>';
+                }
             }
         } else {
             echo '<div class="notice notice-error"><p>Please provide a word to find.</p></div>';
@@ -89,6 +121,7 @@ function wp_title_find_replace_settings_page() {
     // Fetch current settings
     $find_word = isset( $_POST['find_word'] ) ? esc_attr( $_POST['find_word'] ) : '';
     $replace_word = isset( $_POST['replace_word'] ) ? esc_attr( $_POST['replace_word'] ) : '';
+    $exclude_word = isset( $_POST['exclude_word'] ) ? esc_attr( $_POST['exclude_word'] ) : '';
 
     ?>
     <div class="wrap">
@@ -112,6 +145,21 @@ function wp_title_find_replace_settings_page() {
                         <input type="text" id="replace_word" name="replace_word" value="<?php echo esc_attr( $replace_word ); ?>" class="regular-text">
                     </td>
                 </tr>
+                <tr>
+                    <th scope="row">
+                        <label for="exclude_word">Exclude Posts Containing</label>
+                    </th>
+                    <td>
+                        <input type="text" id="exclude_word" name="exclude_word" value="<?php echo esc_attr( $exclude_word ); ?>" class="regular-text">
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <label>
+                            <input type="checkbox" name="update_yoast" value="1"> Update Yoast SEO Meta Titles
+                        </label>
+                    </th>
+                </tr>
             </table>
             <p>
                 <label>
@@ -125,3 +173,4 @@ function wp_title_find_replace_settings_page() {
     </div>
     <?php
 }
+
